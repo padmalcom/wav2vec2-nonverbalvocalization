@@ -19,12 +19,14 @@ class SpeechClassifierOutput(ModelOutput):
 class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 	def __init__(self, config):
 		super().__init__(config)
-		self.num_labels = config.num_labels
+		self.num_labels_age = config.num_labels_age
+		self.num_labels_vocalization = config.num_labels_vocalization
 		self.pooling_mode = config.pooling_mode
 		self.config = config
 
 		self.wav2vec2 = Wav2Vec2Model(config)
-		self.classifier = Wav2Vec2ClassificationHead(config)
+		self.classifier_age = Wav2Vec2ClassificationHead(config)
+		self.classifier_vocalization = Wav2Vec2ClassificationHead(config)
 
 		self.init_weights()
 
@@ -67,10 +69,21 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 		)
 		hidden_states = outputs[0]
 		hidden_states = self.merged_strategy(hidden_states, mode=self.pooling_mode)
-		logits = self.classifier(hidden_states)
+		
+		# split hidden_state by task. what datatype is it? what dimension is expected?
+		hidden_states_age = []
+		hidden_states_vocal = []
+		labels_age = []
+		labels_vocal = []
+		for hs in hidden_states:
+			(hidden_states_vocal, hidden_states_age)[hs[0] == 0].append(hs)
+			(labels_vocal, labels_age)[hs[1] == 0].append(hs)
+				
+		logits_age = self.classifier_age(hidden_states_age)
+		logits_vocal = self.classifier_vocalization(hidden_states_vocal)
 
 		loss = None
-		if labels is not None:
+		if labels_age and labels_vocal is not None:
 			if self.config.problem_type is None:
 				if self.num_labels == 1:
 					self.config.problem_type = "regression"
@@ -81,7 +94,10 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 
 			if self.config.problem_type == "regression":
 				loss_fct = MSELoss()
-				loss = loss_fct(logits.view(-1, self.num_labels), labels)
+				#loss = loss_fct(logits.view(-1, self.num_labels), labels)
+				loss_age = loss_fct(logits_age.view(-1, self.num_labels_age), labels_age.view(-1))
+				loss_vocalization = loss_fct(logits_vocal.view(-1, self.num_labels_vocalization), labels_vocal.view(-1))
+				loss = (loss_age * 0.5)  + (loss_vocalization * 0.5)
 			elif self.config.problem_type == "single_label_classification":
 				loss_fct = CrossEntropyLoss()
 				loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))

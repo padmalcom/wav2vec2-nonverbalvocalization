@@ -43,10 +43,12 @@ if version.parse(torch.__version__) >= version.parse("1.6"):
 RAW_DATA_FILE = 'NonverbalVocalization/Nonverbal_Vocalization.json'
 TRAIN_FILE = "train.json"
 TEST_FILE = "test.json"
-LABELS_FILE = "labels.json"
+AGE_LABELS_FILE = "age_labels.json"
+VOC_LABELS_FILE = "voc_labels.json"
 
 INPUT_COLUMN = "path"
-OUTPUT_COLUMN = "label"
+OUTPUT_COLUMN_1 = "voc"
+OUTPUT_COLUMN_2 = "age"
 
 #model_name_or_path = "facebook/wav2vec2-base" # does not work since not trained on attention mask. see: https://github.com/huggingface/transformers/issues/12934
 model_name_or_path = "facebook/wav2vec2-large-960h-lv60-self"
@@ -59,7 +61,6 @@ model_name_or_path = "facebook/wav2vec2-large-960h-lv60-self"
 pooling_mode = "mean"
 is_regression = False
 
-# create processor
 processor = Wav2Vec2Processor.from_pretrained(model_name_or_path,)
 	
 class CTCTrainer(Trainer):
@@ -100,19 +101,26 @@ class DataCollatorCTCWithPadding:
 
 	def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
 		input_features = [{"input_values": feature["input_values"]} for feature in features]
-		label_features = [feature["label"] for feature in features]
+		label1_features = [feature[OUTPUT_COLUMN_1] for feature in features]
+		label2_features = [feature[OUTPUT_COLUMN_2] for feature in features]
 
-		d_type = torch.long if isinstance(label_features[0], int) else torch.float
+		# use the same d_type since both features are int
+		d_type = torch.long if isinstance(label1_features[0], int) else torch.float
 
+		# the audio array is the same feature for both labels (age, vocalization)
+		features_x2 = input_features + input_features
 		batch = self.processor.pad(
-			input_features,
+			features_x2,
 			padding=self.padding,
 			max_length=self.max_length,
 			pad_to_multiple_of=self.pad_to_multiple_of,
 			return_tensors="pt",
 		)
 
-		batch["labels"] = torch.tensor(label_features, dtype=d_type)
+		batch["labels"] = torch.tensor(label1_features + label2_features, dtype=d_type)
+		
+		task_list = len(label1_features) * [0] + len(label2_features) * [1]
+		batch["task"] = torch.tensor(task_list, dtype=torch.long)
 
 		return batch
 
@@ -127,7 +135,8 @@ def compute_metrics(p: EvalPrediction):
 
 def prepare_data():
 	data = []
-	labels = {}
+	labels_vocalization = {}
+	labels_age = {}
 	with open(RAW_DATA_FILE, 'r') as f:
 		json_data = json.load(f)
 		
@@ -137,12 +146,13 @@ def prepare_data():
 				current_sample = json_data[class_name][sample]
 				
 				# add label id <-> name
-				labels[int(current_sample['label'])] = class_name				
+				labels_vocalization[int(current_sample['label'])] = class_name	
+				labels_age[int(current_sample['age'])] = current_sample['age'] 
 				
 				# add sample
 				formatted_sample = {}
 				formatted_sample['wav'] = os.path.join('NonverbalVocalization', class_name, sample)
-				formatted_sample['label'] = current_sample['label']
+				formatted_sample['voc'] = current_sample['label']
 				formatted_sample['speakerID'] = current_sample['speakerID']
 				formatted_sample['age'] = current_sample['age']
 				formatted_sample['sex'] = current_sample['sex']
@@ -163,8 +173,11 @@ def prepare_data():
 		json.dump(train, json_file)
 	with open(TEST_FILE, 'w') as json_file:
 		json.dump(test, json_file)
-	with open(LABELS_FILE, 'w') as json_file:
-		json.dump(labels, json_file)
+	with open(AGE_LABELS_FILE, 'w') as json_file:
+		json.dump(abels_age, json_file)
+	with open(VOC_LABELS_FILE, 'w') as json_file:
+		json.dump(labels_vocalization, json_file)
+	
 
 def preprocess_function(examples):
 	speech_list = [audio["array"] for audio in examples["audio"]]
@@ -180,20 +193,24 @@ if __name__ == "__main__":
 		prepare_data()
 		
 	# load labels
-	with open(LABELS_FILE) as json_file:
-		labels = json.load(json_file)
+	with open(AGE_LABELS_FILE) as json_file:
+		age_labels = json.load(json_file)
+	with open(VOC_LABELS_FILE) as json_file:
+		voc_labels = json.load(json_file)
 		
 	# load datasets
 	print("Loading datasets...")
 	dataset = load_dataset('json', data_files={'train': TRAIN_FILE, 'test': TEST_FILE}).cast_column("audio", Audio())
 		
 	print(dataset)
-	print("There are ", len(labels), "labels: ", labels)
+	print("There are ", len(voc_labels), "vocalization labels: ", voc_labels)
+	print("There are ", len(age_labels), "age labels: ", age_labels)
 	
 	# create config
 	config = AutoConfig.from_pretrained(
 		model_name_or_path,
-		num_labels=len(labels),
+		num_labels_age=len(age_labels),
+		num_labels_vocalization=len(voc_labels),
 		label2id={labels[label]: i for i, label in enumerate(labels)},
 		id2label={i: labels[label] for i, label in enumerate(labels)},
 		finetuning_task="wav2vec2_clf",
