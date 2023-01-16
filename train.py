@@ -174,14 +174,14 @@ def prepare_data():
 	with open(TEST_FILE, 'w') as json_file:
 		json.dump(test, json_file)
 	with open(AGE_LABELS_FILE, 'w') as json_file:
-		json.dump(abels_age, json_file)
+		json.dump(labels_age, json_file)
 	with open(VOC_LABELS_FILE, 'w') as json_file:
 		json.dump(labels_vocalization, json_file)
 	
 
 def preprocess_function(examples):
 	speech_list = [audio["array"] for audio in examples["audio"]]
-	target_list = [label for label in examples[OUTPUT_COLUMN]]
+	#target_list = [label for label in examples[OUTPUT_COLUMN]]
 
 	result = processor(speech_list, sampling_rate=16000)
 	#result["labels"] = list(target_list)
@@ -189,7 +189,7 @@ def preprocess_function(examples):
 	return result
 	
 if __name__ == "__main__":
-	if not (os.path.exists(TRAIN_FILE) and os.path.exists(TEST_FILE) and os.path.exists(LABELS_FILE)):
+	if not (os.path.exists(TRAIN_FILE) and os.path.exists(TEST_FILE) and os.path.exists(AGE_LABELS_FILE) and os.path.exists(VOC_LABELS_FILE)):
 		prepare_data()
 		
 	# load labels
@@ -209,10 +209,9 @@ if __name__ == "__main__":
 	# create config
 	config = AutoConfig.from_pretrained(
 		model_name_or_path,
-		num_labels_age=len(age_labels),
-		num_labels_vocalization=len(voc_labels),
-		label2id={labels[label]: i for i, label in enumerate(labels)},
-		id2label={i: labels[label] for i, label in enumerate(labels)},
+		num_labels=len(age_labels) + len(voc_labels),
+		label2id={voc_labels[label]: i for i, label in enumerate(voc_labels)},
+		id2label={i: voc_labels[label] for i, label in enumerate(voc_labels)},
 		finetuning_task="wav2vec2_clf",
 	)
 	setattr(config, 'pooling_mode', "mean")
