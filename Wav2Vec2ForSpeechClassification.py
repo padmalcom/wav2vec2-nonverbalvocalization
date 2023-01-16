@@ -19,8 +19,7 @@ class SpeechClassifierOutput(ModelOutput):
 class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 	def __init__(self, config):
 		super().__init__(config)
-		self.num_labels_age = config.num_labels_age
-		self.num_labels_vocalization = config.num_labels_vocalization
+		self.num_labels = config.num_labels
 		self.pooling_mode = config.pooling_mode
 		self.config = config
 

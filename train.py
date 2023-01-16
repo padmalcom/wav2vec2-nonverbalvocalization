@@ -100,6 +100,7 @@ class DataCollatorCTCWithPadding:
 	pad_to_multiple_of_labels: Optional[int] = None
 
 	def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
+		print("Features:", features[1].keys(), "len:", len(features), "type:", type(features))
 		input_features = [{"input_values": feature["input_values"]} for feature in features]
 		label1_features = [feature[OUTPUT_COLUMN_1] for feature in features]
 		label2_features = [feature[OUTPUT_COLUMN_2] for feature in features]
@@ -147,7 +148,7 @@ def prepare_data():
 				
 				# add label id <-> name
 				labels_vocalization[int(current_sample['label'])] = class_name	
-				labels_age[int(current_sample['age'])] = current_sample['age'] 
+				labels_age[int(current_sample['age'])] = str(current_sample['age'])
 				
 				# add sample
 				formatted_sample = {}
@@ -181,10 +182,12 @@ def prepare_data():
 
 def preprocess_function(examples):
 	speech_list = [audio["array"] for audio in examples["audio"]]
-	#target_list = [label for label in examples[OUTPUT_COLUMN]]
+	target_list_1 = [label for label in examples[OUTPUT_COLUMN_1]]
+	target_list_2 = [label for label in examples[OUTPUT_COLUMN_2]]
 
 	result = processor(speech_list, sampling_rate=16000)
-	#result["labels"] = list(target_list)
+	result["voc"] = list(target_list_1)
+	result["age"] = list(target_list_2)
 
 	return result
 	
@@ -206,12 +209,14 @@ if __name__ == "__main__":
 	print("There are ", len(voc_labels), "vocalization labels: ", voc_labels)
 	print("There are ", len(age_labels), "age labels: ", age_labels)
 	
+	all_labels = voc_labels | age_labels
+	
 	# create config
 	config = AutoConfig.from_pretrained(
 		model_name_or_path,
-		num_labels=len(age_labels) + len(voc_labels),
-		label2id={voc_labels[label]: i for i, label in enumerate(voc_labels)},
-		id2label={i: voc_labels[label] for i, label in enumerate(voc_labels)},
+		num_labels=len(all_labels),
+		label2id={all_labels[label]: i for i, label in enumerate(all_labels)},
+		id2label={i: all_labels[label] for i, label in enumerate(all_labels)},
 		finetuning_task="wav2vec2_clf",
 	)
 	setattr(config, 'pooling_mode', "mean")
@@ -240,7 +245,8 @@ if __name__ == "__main__":
 		gradient_accumulation_steps=2,
 		evaluation_strategy="steps",
 		num_train_epochs=20.0,
-		fp16=True,
+		#fp16=True,
+		fp16=False,
 		save_steps=20,
 		eval_steps=10,
 		logging_steps=10,
