@@ -100,10 +100,13 @@ class DataCollatorCTCWithPadding:
 	pad_to_multiple_of_labels: Optional[int] = None
 
 	def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-		print("Features:", features[1].keys(), "len:", len(features), "type:", type(features))
+		print("Features:", features[1].keys(), "len:", len(features), "type:", type(features), "sample label:", features[0]["label"])
 		input_features = [{"input_values": feature["input_values"]} for feature in features]
-		label1_features = [feature[OUTPUT_COLUMN_1] for feature in features]
-		label2_features = [feature[OUTPUT_COLUMN_2] for feature in features]
+		
+		label1_features = [feature["label"][0] for feature in features] # swap 0 and 1?
+		label2_features = [feature["label"][1] for feature in features]
+		
+		print("Label 1 features:", label1_features, "label 2 features:", label2_features)
 
 		# use the same d_type since both features are int
 		d_type = torch.long if isinstance(label1_features[0], int) else torch.float
@@ -122,7 +125,7 @@ class DataCollatorCTCWithPadding:
 		
 		task_list = len(label1_features) * [0] + len(label2_features) * [1]
 		batch["task"] = torch.tensor(task_list, dtype=torch.long)
-
+		
 		return batch
 
 def compute_metrics(p: EvalPrediction):
@@ -182,12 +185,20 @@ def prepare_data():
 
 def preprocess_function(examples):
 	speech_list = [audio["array"] for audio in examples["audio"]]
-	target_list_1 = [label for label in examples[OUTPUT_COLUMN_1]]
-	target_list_2 = [label for label in examples[OUTPUT_COLUMN_2]]
+	
+	labels = ["voc", "age"]
+	
+	labels_batch = {k: examples[k] for k in examples.keys() if k in labels}
+	labels_matrix = np.zeros((len(examples["audio"]), len(labels)))
+	
+	for idx, label in enumerate(labels):
+		labels_matrix[:, idx] = labels_batch[label]
 
 	result = processor(speech_list, sampling_rate=16000)
-	result["voc"] = list(target_list_1)
-	result["age"] = list(target_list_2)
+	
+	result["label"] = labels_matrix.tolist()
+		
+	print("Len labels:", len(result["label"]), "len features:", len(result["input_values"]), "len examples:", len(examples["audio"]))
 
 	return result
 	
@@ -224,22 +235,13 @@ if __name__ == "__main__":
 	print("label2id", config.label2id)
 	print("id2label", config.id2label)
 	
-	processed_dataset = dataset.map(
-		preprocess_function,
-		batch_size=100,
-		batched=True,
-		num_proc=4
-	)
+	processed_dataset = dataset.map(preprocess_function, batch_size=100, batched=True, num_proc=4)
 	
-	model = Wav2Vec2ForSpeechClassification.from_pretrained(
-		model_name_or_path,
-		config=config,
-	)
+	model = Wav2Vec2ForSpeechClassification.from_pretrained(model_name_or_path,config=config)
 	
 	model.freeze_feature_extractor()
 	
-	training_args = TrainingArguments(
-		output_dir="./wav2vec/",
+	training_args = TrainingArguments(output_dir="./wav2vec/",
 		per_device_train_batch_size=4,
 		per_device_eval_batch_size=4,
 		gradient_accumulation_steps=2,

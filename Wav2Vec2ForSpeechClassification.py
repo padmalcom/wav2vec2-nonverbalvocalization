@@ -57,7 +57,9 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 			output_hidden_states=None,
 			return_dict=None,
 			labels=None,
+			task=None
 	):
+		print(1)
 		return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 		outputs = self.wav2vec2(
 			input_values,
@@ -68,19 +70,32 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 		)
 		hidden_states = outputs[0]
 		hidden_states = self.merged_strategy(hidden_states, mode=self.pooling_mode)
+		print(2)
 		
 		# split hidden_state by task. what datatype is it? what dimension is expected?
 		hidden_states_age = []
 		hidden_states_vocal = []
 		labels_age = []
 		labels_vocal = []
-		for hs in hidden_states:
-			(hidden_states_vocal, hidden_states_age)[hs[0] == 0].append(hs)
-			(labels_vocal, labels_age)[hs[1] == 0].append(hs)
+		#for hs in hidden_states:
+		#	print("current hidden state:", hs)
+		#	(hidden_states_vocal, hidden_states_age)[hs[0] == 0].append(hs)
+		#	(labels_vocal, labels_age)[hs[1] == 0].append(hs)
+		if not len(task) == len(hidden_states):
+			print("Length of tasks and hiddenstates differ.")
+		for idx, t in enumerate(task):
+			if t == 0:
+				hidden_states_vocal.append(hidden_states[idx])
+			elif t == 1:
+				hidden_states_age.append(hidden_states[idx])
+			else:
+				print("Unknown task id: ", t)
+			
+		print("Hiddenstates 1:", hidden_states_age, "hiddenstates 2:", hidden_states_vocal)
 				
-		logits_age = self.classifier_age(hidden_states_age)
-		logits_vocal = self.classifier_vocalization(hidden_states_vocal)
-
+		logits_age = self.classifier_age(torch.tensor(hidden_states_age))
+		logits_vocal = self.classifier_vocalization(torch.tensor(hidden_states_vocal))
+		print(3)
 		loss = None
 		if labels_age and labels_vocal is not None:
 			if self.config.problem_type is None:
