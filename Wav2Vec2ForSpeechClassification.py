@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from transformers.file_utils import ModelOutput
 from typing import Dict, List, Optional, Union, Tuple, Any
 from Wav2Vec2ClassificationHead import Wav2Vec2ClassificationHead
+from transformers import AutoConfig
 
 @dataclass
 class SpeechClassifierOutput(ModelOutput):
@@ -18,17 +19,32 @@ class SpeechClassifierOutput(ModelOutput):
 	attentions: Optional[Tuple[torch.FloatTensor]] = None
 	
 class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
-	def __init__(self, config):
+	def __init__(self, config, num_labels_age, num_labels_vocal, model_name_or_path):
 		super().__init__(config)
-		self.num_labels = config.num_labels
+		self.num_labels = config.num_labels # these are the label classes
+		self.num_labels_age = num_labels_age
+		self.num_labels_vocal = num_labels_vocal
 		self.pooling_mode = config.pooling_mode
 		self.config = config
+		
+		print("Num labels (total):", self.num_labels, "num labels age:", self.num_labels_age, "num labels vocal:", num_labels_vocal)
 
 		self.wav2vec2 = Wav2Vec2Model(config)
 		
 		# we can pass the same config since the list of labels does not play a role in the heads
-		self.classifier_age = Wav2Vec2ClassificationHead(config)
-		self.classifier_vocalization = Wav2Vec2ClassificationHead(config)
+		config_age = AutoConfig.from_pretrained(
+			model_name_or_path,
+			num_labels=self.num_labels_age,
+			finetuning_task="wav2vec2_clf",
+		)
+		self.classifier_age = Wav2Vec2ClassificationHead(config_age)
+		
+		config_voc = AutoConfig.from_pretrained(
+			model_name_or_path,
+			num_labels=self.num_labels_vocal,
+			finetuning_task="wav2vec2_clf",
+		)
+		self.classifier_vocalization = Wav2Vec2ClassificationHead(config_voc)
 
 		self.init_weights()
 
@@ -63,7 +79,7 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 			output_attentions=None,
 			output_hidden_states=None,
 			return_dict=None,
-			labels=None,
+			labels=None, # these are the actual labels for this batch
 			task=None
 	):
 		# task 0 = voc, task 1 = age!
@@ -102,25 +118,27 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 		hidden_states_vocal = hidden_states.clone().detach()
 		labels_age = labels.clone().detach()
 		labels_vocal = labels.clone().detach()
+		
 
 		print("Hiddenstates 1 (before):", hidden_states_age.size(), "hiddenstates 2 (before):", hidden_states_vocal.size())
 
 		for idx, t in enumerate(task):
 			# todo: check ids
 			if t == 1:
-				hidden_states_vocal = torch.cat([hidden_states_vocal[0:idx], hidden_states_vocal[idx+1:]])
-				labels_vocal = torch.cat([labels_vocal[0:idx], labels_vocal[idx+1:]])
+				hidden_states_vocal = torch.cat([hidden_states_vocal[0:idx], hidden_states_vocal[idx+1:]], axis = 0)
+				labels_vocal = torch.cat([labels_vocal[0:idx], labels_vocal[idx+1:]], axis = 0)
 			elif t == 0:
-				hidden_states_age = torch.cat([hidden_states_age[0:idx], hidden_states_age[idx+1:]])
-				labels_age = torch.cat([labels_age[0:idx], labels_age[idx+1:]])
+				hidden_states_age = torch.cat([hidden_states_age[0:idx], hidden_states_age[idx+1:]], axis = 0)
+				labels_age = torch.cat([labels_age[0:idx], labels_age[idx+1:]], axis = 0)
 			
 		print("Hiddenstates 1 (after):", hidden_states_age.size(), "hiddenstates 2 (after):", hidden_states_vocal.size())
+	
 				
-		logits_age = self.classifier_age(torch.tensor(hidden_states_age))
-		logits_vocal = self.classifier_vocalization(torch.tensor(hidden_states_vocal))
-		print("logits_age: ", logits_age.size(), "logits_vocal: ", logits_vocal.size())
+		logits_age = self.classifier_age(hidden_states_age)
+		logits_vocal = self.classifier_vocalization(hidden_states_vocal)
+		print("labels age size:", labels_age.size(), "labels voc size:", labels_vocal.size(), "logits_age size: ", logits_age.size(), "logits_vocal size: ", logits_vocal.size())
 		loss = None
-		if labels_age is not None and labels_vocal is not None:
+		if labels is not None:
 			if self.config.problem_type is None:
 				if self.num_labels == 1:
 					self.config.problem_type = "regression"
@@ -131,20 +149,25 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 
 			if self.config.problem_type == "regression":
 				loss_fct = MSELoss()
-				#loss = loss_fct(logits.view(-1, self.num_labels), labels)
-				loss_age = loss_fct(logits_age.view(-1, self.num_labels_age), labels_age.view(-1))
-				loss_vocalization = loss_fct(logits_vocal.view(-1, self.num_labels_vocalization), labels_vocal.view(-1))
-				loss = (loss_age * 0.5)  + (loss_vocalization * 0.5)
+				loss = loss_fct(logits.view(-1, self.num_labels), labels)
 			elif self.config.problem_type == "single_label_classification":
+				#loss_fct = CrossEntropyLoss()
+				#loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 				loss_fct = CrossEntropyLoss()
-				loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+				print("Calculating loss age...")
+				input_age = logits_age.view(-1, len(labels_age))
+				input_age = torch.permute(input_age, (1,0))
+				expected_age = labels_age.view(-1)
+				print("input age:", input_age.size(), "expected_age:", expected_age.size())
+				loss_age = loss_fct(input_age, expected_age) # todo: len(labels_age) might be wrong
+				print("Calculating loss vocal...")
+				loss_vocalization = loss_fct(logits_vocal.view(-1, self.num_labels_vocal), labels_vocal.view(-1)) # view(-1) flattens the vector to 1 row and n columns
+				loss = (loss_age * 0.5)  + (loss_vocalization * 0.5)
 			elif self.config.problem_type == "multi_label_classification":
 				loss_fct = BCEWithLogitsLoss()
-				#loss = loss_fct(logits, labels)
+				loss = loss_fct(logits, labels)
 				
-				loss_age = loss_fct(logits_age.view(-1, len(labels_age)), labels_age.view(-1)) # todo: len(labels_age) might be wrong
-				loss_vocalization = loss_fct(logits_vocal.view(-1, len(labels_voc)), labels_vocal.view(-1))
-				loss = (loss_age * 0.5)  + (loss_vocalization * 0.5)
+				
 
 		if not return_dict:
 			output = (logits,) + outputs[2:]

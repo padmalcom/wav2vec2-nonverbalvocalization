@@ -11,7 +11,7 @@ class Wav2Vec2ClassificationHead(nn.Module):
 		self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
 
 	def forward(self, features, **kwargs):
-		print("Features in Head:", features)
+		print("Features in Head size:", features.size())
 		x = features
 		x = self.dropout(x)
 		x = self.dense(x)

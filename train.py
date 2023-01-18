@@ -111,7 +111,9 @@ class DataCollatorCTCWithPadding:
 		#print("Label 1 features:", label1_features, "label 2 features:", label2_features)
 
 		# use the same d_type since both features are int
-		d_type = torch.long if isinstance(label1_features[0], int) else torch.float
+		#d_type = torch.long if isinstance(label1_features[0], int) else torch.float
+		d_type = torch.long
+		print("Label data type is:", d_type, "orignal type:", type(label1_features[0]))
 
 		# the audio array is the same feature for both labels (age, vocalization)
 		features_x2 = input_features + input_features
@@ -225,27 +227,30 @@ if __name__ == "__main__":
 	print("There are ", len(voc_labels), "vocalization labels: ", voc_labels)
 	print("There are ", len(age_labels), "age labels: ", age_labels)
 	
-	all_labels = voc_labels | age_labels
+	#all_labels = voc_labels | age_labels
+	
+	#print("All labels dict:", all_labels)
     
 	# create config
 	config = AutoConfig.from_pretrained(
 		model_name_or_path,
-		num_labels=len(all_labels),
-		label2id={all_labels[label]: i for i, label in enumerate(all_labels)},
-		id2label={i: all_labels[label] for i, label in enumerate(all_labels)},
+		num_labels=len(voc_labels) + len(age_labels),
+		#num_labels=len(all_labels),
+		#label2id={all_labels[label]: i for i, label in enumerate(all_labels)},
+		#id2label={i: all_labels[label] for i, label in enumerate(all_labels)},
 		finetuning_task="wav2vec2_clf",
 	)
-	setattr(config, 'pooling_mode', "mean")
-	#config.pooling_mode = "mean"
-	print("label2id", config.label2id)
-	print("id2label", config.id2label)
+	#setattr(config, 'pooling_mode', "mean")
+	config.pooling_mode = "mean"
+	#print("label2id", config.label2id)
+	#print("id2label", config.id2label)
 	
 	processed_dataset = dataset.map(preprocess_function, batch_size=100, batched=True, num_proc=4)
 	
 	print("Processed dataset:", processed_dataset)
-	#print("Sample from train:", processed_dataset['train'][0])
+	print("Sample from train:", type(processed_dataset['train'][0]['voc']), "age:", type(processed_dataset['train'][0]['voc']))
 	
-	model = Wav2Vec2ForSpeechClassification.from_pretrained(model_name_or_path,config=config)
+	model = Wav2Vec2ForSpeechClassification.from_pretrained(model_name_or_path,config=config, num_labels_age=len(age_labels), num_labels_vocal=len(voc_labels), model_name_or_path=model_name_or_path)
 	
 	model.freeze_feature_extractor()
 	
