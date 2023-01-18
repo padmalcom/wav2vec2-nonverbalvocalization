@@ -1,4 +1,5 @@
 # src: https://colab.research.google.com/github/m3hrdadfi/soxan/blob/main/notebooks/Emotion_recognition_in_Greek_speech_using_Wav2Vec2.ipynb#scrollTo=0Tl6iKAUR4EL
+# example: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/BERT/Fine_tuning_BERT_(and_friends)_for_multi_label_text_classification.ipynb
 
 import os
 import json
@@ -100,13 +101,14 @@ class DataCollatorCTCWithPadding:
 	pad_to_multiple_of_labels: Optional[int] = None
 
 	def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-		print("Features:", features[1].keys(), "len:", len(features), "type:", type(features), "sample label:", features[0]["label"])
 		input_features = [{"input_values": feature["input_values"]} for feature in features]
 		
-		label1_features = [feature["label"][0] for feature in features] # swap 0 and 1?
-		label2_features = [feature["label"][1] for feature in features]
+		#print("Features:", features[1].keys(), "len features:", len(features), "type:", type(features), "sample label:", features[0]["labels"], "len input:", len(input_features))
 		
-		print("Label 1 features:", label1_features, "label 2 features:", label2_features)
+		label1_features = [feature["labels"][0] for feature in features] # swap 0 and 1?
+		label2_features = [feature["labels"][1] for feature in features] # label 2 = age
+		
+		#print("Label 1 features:", label1_features, "label 2 features:", label2_features)
 
 		# use the same d_type since both features are int
 		d_type = torch.long if isinstance(label1_features[0], int) else torch.float
@@ -120,11 +122,14 @@ class DataCollatorCTCWithPadding:
 			pad_to_multiple_of=self.pad_to_multiple_of,
 			return_tensors="pt",
 		)
+		# batch is a BatchFeature
 
 		batch["labels"] = torch.tensor(label1_features + label2_features, dtype=d_type)
 		
 		task_list = len(label1_features) * [0] + len(label2_features) * [1]
 		batch["task"] = torch.tensor(task_list, dtype=torch.long)
+		
+		#print("Training batch:", batch)
 		
 		return batch
 
@@ -196,9 +201,9 @@ def preprocess_function(examples):
 
 	result = processor(speech_list, sampling_rate=16000)
 	
-	result["label"] = labels_matrix.tolist()
+	result["labels"] = labels_matrix.tolist()
 		
-	print("Len labels:", len(result["label"]), "len features:", len(result["input_values"]), "len examples:", len(examples["audio"]))
+	print("Len labels:", len(result["labels"]), "len features:", len(result["input_values"]), "len examples:", len(examples["audio"]))
 
 	return result
 	
@@ -221,7 +226,7 @@ if __name__ == "__main__":
 	print("There are ", len(age_labels), "age labels: ", age_labels)
 	
 	all_labels = voc_labels | age_labels
-	
+    
 	# create config
 	config = AutoConfig.from_pretrained(
 		model_name_or_path,
@@ -236,6 +241,9 @@ if __name__ == "__main__":
 	print("id2label", config.id2label)
 	
 	processed_dataset = dataset.map(preprocess_function, batch_size=100, batched=True, num_proc=4)
+	
+	print("Processed dataset:", processed_dataset)
+	#print("Sample from train:", processed_dataset['train'][0])
 	
 	model = Wav2Vec2ForSpeechClassification.from_pretrained(model_name_or_path,config=config)
 	
@@ -267,7 +275,6 @@ if __name__ == "__main__":
 		eval_dataset=processed_dataset['test'],
 		tokenizer=processor.feature_extractor
 	)
-	
 	tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_name_or_path)
 	tokenizer.save_pretrained("myrun3") 
 
