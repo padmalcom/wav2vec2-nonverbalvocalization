@@ -108,6 +108,9 @@ class DataCollatorCTCWithPadding:
 		label1_features = [feature["labels"][0] for feature in features] # swap 0 and 1?
 		label2_features = [feature["labels"][1] for feature in features] # label 2 = age
 		
+		for feature in features:
+			print("XXXX:", feature["labels"])
+		
 		#print("Label 1 features:", label1_features, "label 2 features:", label2_features)
 
 		# use the same d_type since both features are int
@@ -151,6 +154,7 @@ def prepare_data():
 	with open(RAW_DATA_FILE, 'r') as f:
 		json_data = json.load(f)
 		
+		ageDictIdx = 0
 		for class_name in json_data:
 			print("Processing:", class_name)
 			for sample in json_data[class_name]:
@@ -158,14 +162,20 @@ def prepare_data():
 				
 				# add label id <-> name
 				labels_vocalization[int(current_sample['label'])] = class_name	
-				labels_age[int(current_sample['age'])] = str(current_sample['age'])
 				
+				if current_sample['age'] in labels_age.values():
+					age_key = [k for k, v in labels_age.items() if v == current_sample['age']][0]
+				else:
+					labels_age[ageDictIdx] = current_sample['age']
+					age_key = ageDictIdx
+					ageDictIdx +=1
+					
 				# add sample
 				formatted_sample = {}
 				formatted_sample['wav'] = os.path.join('NonverbalVocalization', class_name, sample)
 				formatted_sample['voc'] = current_sample['label']
 				formatted_sample['speakerID'] = current_sample['speakerID']
-				formatted_sample['age'] = current_sample['age']
+				formatted_sample['age'] = age_key
 				formatted_sample['sex'] = current_sample['sex']
 				
 				# audio is cast later on
@@ -260,8 +270,7 @@ if __name__ == "__main__":
 		gradient_accumulation_steps=2,
 		evaluation_strategy="steps",
 		num_train_epochs=20.0,
-		#fp16=True,
-		fp16=False,
+		fp16=True,
 		save_steps=20,
 		eval_steps=10,
 		logging_steps=10,
