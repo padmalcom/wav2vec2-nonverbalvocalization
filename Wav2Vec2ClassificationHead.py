@@ -4,14 +4,13 @@ import torch
 class Wav2Vec2ClassificationHead(nn.Module):
 	"""Head for wav2vec classification task."""
 
-	def __init__(self, config):
+	def __init__(self, hidden_size, final_dropout, num_labels):
 		super().__init__()
-		self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-		self.dropout = nn.Dropout(config.final_dropout)
-		self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
+		self.dense = nn.Linear(hidden_size, hidden_size)
+		self.dropout = nn.Dropout(final_dropout)
+		self.out_proj = nn.Linear(hidden_size, num_labels)
 
 	def forward(self, features, **kwargs):
-		print("Features in Head size:", features.size())
 		x = features
 		x = self.dropout(x)
 		x = self.dense(x)

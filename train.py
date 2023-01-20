@@ -107,16 +107,12 @@ class DataCollatorCTCWithPadding:
 		
 		label1_features = [feature["labels"][0] for feature in features] # swap 0 and 1?
 		label2_features = [feature["labels"][1] for feature in features] # label 2 = age
-		
-		for feature in features:
-			print("XXXX:", feature["labels"])
-		
+				
 		#print("Label 1 features:", label1_features, "label 2 features:", label2_features)
 
 		# use the same d_type since both features are int
 		#d_type = torch.long if isinstance(label1_features[0], int) else torch.float
 		d_type = torch.long
-		print("Label data type is:", d_type, "orignal type:", type(label1_features[0]))
 
 		# the audio array is the same feature for both labels (age, vocalization)
 		features_x2 = input_features + input_features
@@ -260,7 +256,9 @@ if __name__ == "__main__":
 	print("Processed dataset:", processed_dataset)
 	print("Sample from train:", type(processed_dataset['train'][0]['voc']), "age:", type(processed_dataset['train'][0]['voc']))
 	
-	model = Wav2Vec2ForSpeechClassification.from_pretrained(model_name_or_path,config=config, num_labels_age=len(age_labels), num_labels_vocal=len(voc_labels), model_name_or_path=model_name_or_path)
+	setattr(config, 'num_labels_age', len(age_labels))
+	setattr(config, 'num_labels_vocal', len(voc_labels))
+	model = Wav2Vec2ForSpeechClassification.from_pretrained(model_name_or_path,config=config)
 	
 	model.freeze_feature_extractor()
 	
@@ -269,7 +267,7 @@ if __name__ == "__main__":
 		per_device_eval_batch_size=4,
 		gradient_accumulation_steps=2,
 		evaluation_strategy="steps",
-		num_train_epochs=20.0,
+		num_train_epochs=2.0,
 		fp16=True,
 		save_steps=20,
 		eval_steps=10,

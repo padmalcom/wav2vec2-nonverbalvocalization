@@ -7,6 +7,7 @@ async-timeout==4.0.2
 attrs==22.2.0
 audioread==3.0.0
 cachetools==5.2.0
+certifi @ file:///C:/b/abs_85o_6fm0se/croot/certifi_1671487778835/work/certifi
 cffi==1.15.1
 charset-normalizer==2.1.1
 colorama==0.4.6
@@ -74,6 +75,9 @@ soundfile==0.11.0
 termcolor==1.1.0
 threadpoolctl==3.1.0
 tokenizers==0.13.2
+torch==1.12.1+cu113
+torchaudio==0.12.1+cu113
+torchvision==0.13.1+cu113
 tqdm==4.64.1
 transformers==4.25.1
 typing-extensions==3.7.4.3

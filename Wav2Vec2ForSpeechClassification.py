@@ -19,32 +19,17 @@ class SpeechClassifierOutput(ModelOutput):
 	attentions: Optional[Tuple[torch.FloatTensor]] = None
 	
 class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
-	def __init__(self, config, num_labels_age, num_labels_vocal, model_name_or_path):
+	def __init__(self, config):
 		super().__init__(config)
 		self.num_labels = config.num_labels # these are the label classes
-		self.num_labels_age = num_labels_age
-		self.num_labels_vocal = num_labels_vocal
 		self.pooling_mode = config.pooling_mode
 		self.config = config
 		
-		print("Num labels (total):", self.num_labels, "num labels age:", self.num_labels_age, "num labels vocal:", num_labels_vocal)
+		print("Num labels (total):", self.num_labels, "num labels age:", config.num_labels_age, "num labels vocal:", config.num_labels_vocal)
 
 		self.wav2vec2 = Wav2Vec2Model(config)
-		
-		# we can pass the same config since the list of labels does not play a role in the heads
-		config_age = AutoConfig.from_pretrained(
-			model_name_or_path,
-			num_labels=self.num_labels_age,
-			finetuning_task="wav2vec2_clf",
-		)
-		self.classifier_age = Wav2Vec2ClassificationHead(config_age)
-		
-		config_voc = AutoConfig.from_pretrained(
-			model_name_or_path,
-			num_labels=self.num_labels_vocal,
-			finetuning_task="wav2vec2_clf",
-		)
-		self.classifier_vocalization = Wav2Vec2ClassificationHead(config_voc)
+		self.classifier_age = Wav2Vec2ClassificationHead(config.hidden_size, config.final_dropout, config.num_labels_age)
+		self.classifier_vocalization = Wav2Vec2ClassificationHead(config.hidden_size, config.final_dropout, config.num_labels_vocal)
 
 		self.init_weights()
 
@@ -57,14 +42,13 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 			mode="mean"
 	):
 		if mode == "mean":
-			print("Mode mean")
 			outputs = torch.mean(hidden_states, dim=1)
-		elif mode == "sum":
-			print("Mode sum - can be deleted?")
-			outputs = torch.sum(hidden_states, dim=1)
-		elif mode == "max":
-			print("Mode max - can be deleted?")
-			outputs = torch.max(hidden_states, dim=1)[0]
+		#elif mode == "sum":
+		#	print("Mode sum - can be deleted?")
+		#	outputs = torch.sum(hidden_states, dim=1)
+		#elif mode == "max":
+		#	print("Mode max - can be deleted?")
+		#	outputs = torch.max(hidden_states, dim=1)[0]
 		else:
 			print("Exception never occurs - ups...")
 			raise Exception(
@@ -79,75 +63,56 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 			output_attentions=None,
 			output_hidden_states=None,
 			return_dict=None,
-			labels=None, # these are the actual labels for this batch
+			labels=None, # these are the actual labels for this batch, not the classes
 			task=None
 	):
 		# task 0 = voc, task 1 = age!
-		print("1 - return_dict is: ", return_dict)
-		print("labels: ", labels)
-		print("tasks", task)
-		print("output_hidden_states:", output_hidden_states)
-		print("output_attentions:", output_attentions)
-		print("attention_mask:", attention_mask)
 		return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-		print("Classifier input values:", input_values.size())
 		outputs = self.wav2vec2(
 			input_values,
 			attention_mask=attention_mask,
 			output_attentions=output_attentions,
 			output_hidden_states=output_hidden_states,
 			return_dict=return_dict,
-		)
-		print("Outputs:", outputs.__dict__.keys(), "object:", outputs)
-		print("len last hidden state:", outputs.last_hidden_state.size())
-		print("len extract_features:", outputs.extract_features.size())
-		if outputs.hidden_states:
-			print("len hidden states:", len(outputs.hidden_states))
-		if outputs.attentions:
-			print("len attentions:", len(outputs.attentions))
-			
-		print("Outputs:", outputs.__dict__.keys())
+		)		
 		hidden_states = outputs[0]
-		print("Hidden states size (first):", hidden_states.size())
 		hidden_states = self.merged_strategy(hidden_states, mode=self.pooling_mode)
-		print(2)
-		print("Hidden states size (second):", hidden_states.size())
 		
 		# split hidden_state by task. what datatype is it? what dimension is expected?
 		hidden_states_age = hidden_states.clone().detach()
 		hidden_states_vocal = hidden_states.clone().detach()
-		labels_age = labels.clone().detach()
-		labels_vocal = labels.clone().detach()
 		
-
-		print("Hiddenstates 1 (before):", hidden_states_age.size(), "hiddenstates 2 (before):", hidden_states_vocal.size(),
-			"labels age (before):", labels_age, "labels_vocal (before):", labels_vocal, "tasks:", task)
-
 		delIdxVoc = 0
 		delIdxAge = 0
 		for idx, t in enumerate(task):
 			# todo: check ids
-			print("index: ", idx, "t:", t)
 			if t == 1:
 				hidden_states_vocal = torch.cat([hidden_states_vocal[0:delIdxVoc], hidden_states_vocal[delIdxAge+1:]], axis = 0)
-				labels_vocal = torch.cat([labels_vocal[0:delIdxVoc], labels_vocal[delIdxVoc+1:]], axis = 0)
-				print("Labels vocal is now:", labels_vocal)
 				delIdxAge +=1
 			elif t == 0:
 				hidden_states_age = torch.cat([hidden_states_age[0:delIdxAge], hidden_states_age[delIdxAge+1:]], axis = 0)
-				labels_age = torch.cat([labels_age[0:delIdxAge], labels_age[delIdxAge+1:]], axis = 0)
-				print("Labels age is now:", labels_age)
 				delIdxVoc +=1
-			
-		print("Hiddenstates 1 (after):", hidden_states_age.size(), "hiddenstates 2 (after):", hidden_states_vocal.size(),
-			"labels age (after):", labels_age, "labels_vocal (after):", labels_vocal)
-	
-				
+
 		logits_age = self.classifier_age(hidden_states_age)
 		logits_vocal = self.classifier_vocalization(hidden_states_vocal)
-		print("labels age size:", labels_age.size(), "labels voc size:", labels_vocal.size(), "logits_age size: ", logits_age.size(), "logits_vocal size: ", logits_vocal.size())
+			
 		loss = None
 		if labels is not None:
+		
+			labels_age = labels.clone().detach()
+			labels_vocal = labels.clone().detach()
+			
+			delIdxVoc = 0
+			delIdxAge = 0
+			for idx, t in enumerate(task):
+				# todo: check ids
+				if t == 1:
+					labels_vocal = torch.cat([labels_vocal[0:delIdxVoc], labels_vocal[delIdxVoc+1:]], axis = 0)
+					delIdxAge +=1
+				elif t == 0:
+					labels_age = torch.cat([labels_age[0:delIdxAge], labels_age[delIdxAge+1:]], axis = 0)
+					delIdxVoc +=1			
+		
 			if self.config.problem_type is None:
 				if self.num_labels == 1:
 					self.config.problem_type = "regression"
@@ -163,21 +128,15 @@ class Wav2Vec2ForSpeechClassification(Wav2Vec2PreTrainedModel):
 				#loss_fct = CrossEntropyLoss()
 				#loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 				loss_fct = CrossEntropyLoss()
-				print("Calculating loss age...")
 				input_age = logits_age.view(-1, len(labels_age))
 				input_age = torch.permute(input_age, (1,0))
 				expected_age = labels_age.view(-1)
-				print("input age:", input_age.cpu().detach().numpy(), "expected_age:", expected_age.cpu().detach().numpy())
 				loss_age = loss_fct(input_age, expected_age)
-				print("Calculating loss vocal...")
 				input_voc = logits_vocal.view(-1, len(labels_vocal))
 				input_voc = torch.permute(input_voc, (1,0))
 				expected_voc = labels_vocal.view(-1)
-				print("input voc:", input_voc, "expected voc:", expected_voc)
 				loss_vocalization = loss_fct(input_voc, expected_voc) # view(-1) flattens the vector to 1 row and n columns
-				print("loss age:", loss_age, "loss vocal:", loss_vocalization)
 				loss = (loss_age * 0.5)  + (loss_vocalization * 0.5)
-				print("Overall loss is: ", loss)
 			elif self.config.problem_type == "multi_label_classification":
 				loss_fct = BCEWithLogitsLoss()
 				loss = loss_fct(logits, labels)
