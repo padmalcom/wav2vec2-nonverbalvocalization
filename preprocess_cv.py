@@ -110,8 +110,7 @@ def prepare_data():
 						data.append(formatted_sample)
 						i += 1
 		except KeyboardInterrupt:
-			print "Keyboard interrupt called. Writing files and exiting"
-			break
+			print("Keyboard interrupt called. Writing files and exiting")
 		
 		random.shuffle(data)
 		print("Found", len(data), "samples. Example: ", data[:1])
