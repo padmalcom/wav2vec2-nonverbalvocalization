@@ -81,34 +81,37 @@ def prepare_data():
 			os.mkdir(os.path.join('common-voice-12', "wavs"))
 			
 		i = 0
-		for line in tqdm(tsv, total=row_count):
-			formatted_sample = {}
-			formatted_sample['speaker'] = line['client_id']
-			formatted_sample['file'] = line['path']
-			formatted_sample['sentence'] = line['sentence'].translate(str.maketrans('', '', string.punctuation))
-			formatted_sample['age'] = line['age']
-			formatted_sample['gender'] = line['gender']
-			formatted_sample['language'] = line['locale']
-			
-			# '0' non irony, '1' irony
-			formatted_sample['irony'] = irony(translate(formatted_sample['sentence']))
-			
-			mp3FullPath = os.path.join('common-voice-12', "clips", line['path'])
-			filename, _ = os.path.splitext(os.path.basename(mp3FullPath))
-			sound = AudioSegment.from_mp3(mp3FullPath)
-			if sound.duration_seconds > 0:
-					sound = sound.set_frame_rate(16000)
-					sound = sound.set_channels(1)
-					wav_path = os.path.join('common-voice-12', "wavs", filename + ".wav")
-					sound.export(wav_path, format="wav")
-					formatted_sample['file'] = filename + ".wav"
-					
-					# emotion classification
-					formatted_sample['emotion'] = emotion(wav_path)
+		try:
+			for line in tqdm(tsv, total=row_count):
+				formatted_sample = {}
+				formatted_sample['speaker'] = line['client_id']
+				formatted_sample['file'] = line['path']
+				formatted_sample['sentence'] = line['sentence'].translate(str.maketrans('', '', string.punctuation))
+				formatted_sample['age'] = line['age']
+				formatted_sample['gender'] = line['gender']
+				formatted_sample['language'] = line['locale']
+				
+				# '0' non irony, '1' irony
+				formatted_sample['irony'] = irony(translate(formatted_sample['sentence']))
+				
+				mp3FullPath = os.path.join('common-voice-12', "clips", line['path'])
+				filename, _ = os.path.splitext(os.path.basename(mp3FullPath))
+				sound = AudioSegment.from_mp3(mp3FullPath)
+				if sound.duration_seconds > 0:
+						sound = sound.set_frame_rate(16000)
+						sound = sound.set_channels(1)
+						wav_path = os.path.join('common-voice-12', "wavs", filename + ".wav")
+						sound.export(wav_path, format="wav")
+						formatted_sample['file'] = filename + ".wav"
+						
+						# emotion classification
+						formatted_sample['emotion'] = emotion(wav_path)
 
-					data.append(formatted_sample)
-					i += 1
-			
+						data.append(formatted_sample)
+						i += 1
+		except KeyboardInterrupt:
+			print "Keyboard interrupt called. Writing files and exiting"
+		
 		random.shuffle(data)
 		print("Found", len(data), "samples. Example: ", data[:1])
 		
